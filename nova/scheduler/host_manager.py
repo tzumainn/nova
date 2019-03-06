@@ -40,6 +40,7 @@ from nova.scheduler import filters
 from nova.scheduler import weights
 from nova import utils
 from nova.virt import hardware
+from nova.virt.ironic import client_wrapper as ironic_client_wrapper
 
 
 CONF = nova.conf.CONF
@@ -105,7 +106,7 @@ class HostState(object):
     previously used and lock down access.
     """
 
-    def __init__(self, host, node, cell_uuid):
+    def __init__(self, host, node, cell_uuid, ironic_node=None):
         self.host = host
         self.nodename = node
         self.uuid = None
@@ -154,6 +155,9 @@ class HostState(object):
 
         # Host cell (v2) membership
         self.cell_uuid = cell_uuid
+
+        # Ironic node information
+        self.ironic_node = ironic_node
 
         self.updated = None
 
@@ -339,8 +343,8 @@ class HostManager(object):
     """Base HostManager class."""
 
     # Can be overridden in a subclass
-    def host_state_cls(self, host, node, cell, **kwargs):
-        return HostState(host, node, cell)
+    def host_state_cls(self, host, node, cell, ironic_node, **kwargs):
+        return HostState(host, node, cell, ironic_node)
 
     def __init__(self):
         self.refresh_cells_caches()
@@ -706,6 +710,9 @@ class HostManager(object):
 
         Also updates the HostStates internal mapping for the HostManager.
         """
+        # get ironic client
+        ironic_client = ironic_client_wrapper.IronicClientWrapper()
+
         # Get resource usage across the available compute nodes:
         host_state_map = {}
         seen_nodes = set()
@@ -722,9 +729,11 @@ class HostManager(object):
                 node = compute.hypervisor_hostname
                 state_key = (host, node)
                 host_state = host_state_map.get(state_key)
+                ironic_node = ironic_client.call('node.get', node)
+
                 if not host_state:
                     host_state = self.host_state_cls(host, node,
-                                                     cell_uuid,
+                                                     cell_uuid, ironic_node,
                                                      compute=compute)
                     host_state_map[state_key] = host_state
                 # We force to update the aggregates info each time a
